@@ -36,10 +36,10 @@ result = gtsam.LevenbergMarquardtOptimizer(graph, estimate).optimize()
 # print("Final Result:")
 # print(result)
 
-parameters = gtsam.LevenbergMarquardtParams()
-parameters.setRelativeErrorTol(1e-5)
-parameters.setMaxIterations(100)
-gtsam.LevenbergMarquardtOptimizer(graph, estimate, parameters).optimize()
+# parameters = gtsam.LevenbergMarquardtParams()
+# parameters.setRelativeErrorTol(1e-5)
+# parameters.setMaxIterations(100)
+# gtsam.LevenbergMarquardtOptimizer(graph, estimate, parameters).optimize()
 
 marginals = gtsam.Marginals(graph, result)
 

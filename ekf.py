@@ -4,11 +4,7 @@ import math
 from matplotlib.patches import Ellipse
 import matplotlib.lines as mlines
 from tqdm import tqdm
-# import jax
-# import jax.numpy as jnp
-# from jax import jit, vmap
 import time
-# jax.config.update('jax_platform_name', 'cpu')
 
 # robot association is an array where each row corresponds a bar code value to a landmark
 robot_association = np.loadtxt('datasets/MRCLAM_Dataset1/Barcodes.dat', skiprows=4, dtype='int')

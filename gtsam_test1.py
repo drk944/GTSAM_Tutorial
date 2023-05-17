@@ -66,17 +66,19 @@ def dead_reckoning(robot1_odometry, initial_x, initial_y, initial_theta):
         positions[i] = [x, y, theta]
     return positions
 
-sigma_range = 2.5
-sigma_bearing = 5
-
-alphas = [.0009, .000008, .0009, .000008] # robot-dependent motion noise 
-
 graph_keys = []
+num_iterations_to_run = 5000
 
 def run(robot_odometry, initial_x, initial_y, initial_theta, robot_measurements):    
     graph = gtsam.NonlinearFactorGraph()
     priorMean = gtsam.Pose2(initial_x, initial_y, initial_theta)
-    priorNoise = gtsam.noiseModel.Diagonal.Sigmas(np.array([0.1, 0.1, 0.05]))
+    
+    # Noise parameters
+    ODOMETRY_NOISE = gtsam.noiseModel.Diagonal.Sigmas(np.array([0.0025, 0.0025, 0.00675]))
+    sigma_range = 0.9125 #5125 #5 # 0.125
+    sigma_bearing = 0.9025 #525 #125 #0.025 # 1.5 degree sigma, converted to radians
+
+    priorNoise = gtsam.noiseModel.Diagonal.Sigmas(np.array([0.0001, 0.0001, 0.0005]))
     graph.push_back(gtsam.PriorFactorPose2(1, priorMean, priorNoise))
     graph_keys.append(1)
     
@@ -94,7 +96,6 @@ def run(robot_odometry, initial_x, initial_y, initial_theta, robot_measurements)
     positions[0] = np.array([initial_x, initial_y, initial_theta])
     measurement_idx = 0
 
-    ODOMETRY_NOISE = gtsam.noiseModel.Diagonal.Sigmas(np.array([0.0001, 0.0001, 0.0001]))
 
     time_stamp_sensor = []
     # sigma_bars = np.empty((robot1_odometry.shape[0], 3, 3))
@@ -104,9 +105,8 @@ def run(robot_odometry, initial_x, initial_y, initial_theta, robot_measurements)
     # Time to actually iterate through the data
     start_time = time.time()
     for i in range(1, robot_odometry.shape[0]):
-        if i > 50:
+        if i > num_iterations_to_run:
             break
-
 
         dt = robot_odometry[i,0] - robot_odometry[i-1,0]
 
@@ -124,10 +124,10 @@ def run(robot_odometry, initial_x, initial_y, initial_theta, robot_measurements)
             # Add measurement
             # graph.add(gtsam.BearingRangeFactor2D(i, robot_association_dict[int(robot_measurements[measurement_idx][1])], robot_measurements[measurement_idx][2], gtsam.noiseModel.Diagonal.Sigmas(np.array([sigma_bearing, sigma_range]))))
             angle = robot_measurements[measurement_idx][2]
-            angle = angle * math.pi / 180
+            # angle -= np.pi/2 # The data set has the angle off by 90 degrees
 
             m_range = robot_measurements[measurement_idx][3]
-
+            
             measurement_noise = gtsam.noiseModel.Diagonal.Sigmas((sigma_bearing, sigma_range))
             
             landmark_id = int(robot_measurements[measurement_idx][1])
@@ -136,33 +136,39 @@ def run(robot_odometry, initial_x, initial_y, initial_theta, robot_measurements)
             gt_landmark = gtsam.symbol('l', landmark_id)
 
 
-            graph.add(gtsam.BearingRangeFactor2D(i, gt_landmark, gtsam.Rot2.fromDegrees(angle), m_range, measurement_noise))
+            graph.add(gtsam.BearingRangeFactor2D(i, gt_landmark, gtsam.Rot2(angle), m_range, measurement_noise))
             measurement_idx += 1
             reading = robot_measurements[measurement_idx][1:]
             if measurement_idx >= robot_measurements.shape[0]-5: # The end of the data set gets a little weird.
                 print("Computation Time:", time.time() - start_time)
-                return graph, seen_landmarks
+                return graph, graph_keys, seen_landmarks
 
-        # positions[i] = mu_bar
-        # est = [robot_odometry[i][0], reading]
-        # time_stamp_sensor.append(est)
-    return graph, seen_landmarks
+    return graph, graph_keys, seen_landmarks
 
-# sensor_reading(mu_bar, sigma_bar, z, Q, landmarks):
 robot1_odometry = robot1_odometry[100:-1]
 # find the starting GT position
 gt_index = 0
 while robot_1_gt[gt_index,0] < robot1_odometry[0,0]:
     gt_index += 1
 
-graph, seen_landmarks = run(robot1_odometry, robot_1_gt[gt_index,1], robot_1_gt[gt_index,2], robot_1_gt[gt_index,3], robot1_measurements)
+index = num_iterations_to_run
+gt_stop = gt_index
+while robot_1_gt[gt_stop,0] < robot1_odometry[index,0]:
+    gt_stop += 1
 
+# (robot_1_gt[gt_index:gt_stop,1], robot_1_gt[gt_index:gt_stop,2])
+
+
+
+graph, poses, seen_landmarks = run(robot1_odometry, robot_1_gt[gt_index,1], robot_1_gt[gt_index,2], robot_1_gt[gt_index,3], robot1_measurements)
 
 positions_dr = dead_reckoning(robot1_odometry, robot_1_gt[gt_index,1], robot_1_gt[gt_index,2], robot_1_gt[gt_index,3])
-positions_dr = positions_dr[:11]
+
 estimate = gtsam.Values()
-for i in range(0, len(positions_dr)):
+for i in range(0, len(poses)):
     estimate.insert(i+1, gtsam.Pose2(positions_dr[i,0], positions_dr[i,1], positions_dr[i,2]))
+    # estimate.insert(i+1, gtsam.Pose2(robot_1_gt[gt_index+i+1,1], robot_1_gt[gt_index+i+1,2], robot_1_gt[gt_index+i+1,3]))
+
 
 landmark_keys = []
 for i in range(0, len(landmark_gt)):
@@ -174,15 +180,15 @@ for i in range(0, len(landmark_gt)):
     estimate.insert(gt_landmark, gtsam.Point2(landmark_gt[i,1], landmark_gt[i,2]))
 
 # Print estimate
-print("Initial Estimate:")
-print(estimate)
+# print("Initial Estimate:")
+# print(estimate)
 
 # Optimize using Levenberg-Marquardt optimization
 result = gtsam.LevenbergMarquardtOptimizer(graph, estimate).optimize()
 
 # Print the results
-print("Final Result:")
-print(result)
+# print("Final Result:")
+# print(result)
 
 # Recover the Marginals
 marginals = gtsam.Marginals(graph, result)
@@ -191,24 +197,27 @@ marginals = gtsam.Marginals(graph, result)
 fig = plt.figure(layout='tight')
 ax1 = fig.add_subplot(111, aspect='equal')
 
+i = 0
 for key in graph_keys:
-    gtsam_plot.plot_pose2_on_axes(ax1, result.atPose2(key), 0.1, marginals.marginalCovariance(key))
+    i += 1
+    if i % 50 == 0:
+        gtsam_plot.plot_pose2_on_axes(ax1, result.atPose2(key), 0.05, marginals.marginalCovariance(key))
 # for key in landmark_keys:
-    # gtsam_plot.plot (ax1, result.atPose2(key))
-    # gtsam_plot.plot_point2_on_axes(ax1, result.atPoint2(key), 0.1, marginals.marginalCovariance(key))
+#     gtsam_plot.plot_pose2_on_axes(ax1, result.atPoint2(key), 0.1, marginals.marginalCovariance(key))
 
 # plt.show(block=True)
 
-# Plotting
-# Static Plotting
-# plot the ground truth landmarks
-# plt.figure()
-# index = 30000
+## Plotting
+## Static Plotting
+## plot the ground truth landmarks
+## plt.figure()
+## index = 30000
+# index = num_iterations_to_run
 # gt_stop = gt_index
 # while robot_1_gt[gt_stop,0] < robot1_odometry[index,0]:
 #     gt_stop += 1
 
-ax1.plot(landmark_gt[:,1], landmark_gt[:,2], 'r.', markersize=20)
+# ax1.plot(landmark_gt[:,1], landmark_gt[:,2], 'r.', markersize=20)
 # # add labels to the landmarks
 # for i in range(landmark_gt.shape[0]):
     # plt.text(landmark_gt[i,1], landmark_gt[i,2], str(int(landmark_gt[i,0])))
@@ -223,7 +232,9 @@ ax1.plot(positions_dr[:index,0], positions_dr[:index,1], 'y-', label='Dead Recko
 # # plot the EKF robot trajectory
 # plt.plot(ekf_positions[:index,0], ekf_positions[:index,1], 'g-', label='EKF')
 
-# plt.legend()
+# plot legend with location in upper right
+ax1.legend(loc='upper right')
+
 # plt.title('EKF')
 # plt.xlabel('x(m)')
 # plt.ylabel('y(m)')
