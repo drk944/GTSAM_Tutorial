@@ -47,6 +47,7 @@ robot1_measurements = robot1_measurements[idx]
 # Robot odometry is recorded as: timestep, forward velocity (m/s), angular velocity (rad/s)
 robot1_odometry = np.loadtxt('datasets/MRCLAM_Dataset1/Robot1_Odometry.dat', skiprows=4, dtype='float')
 
+# Function to convert odometry data to dead reckoning positional data
 def dead_reckoning(robot1_odometry, initial_x, initial_y, initial_theta):
     x = initial_x # We need to know where the robot is starting from
     y = initial_y
@@ -95,11 +96,7 @@ def run(robot_odometry, initial_x, initial_y, initial_theta, robot_measurements)
     # Add the initial position to the array
     positions[0] = np.array([initial_x, initial_y, initial_theta])
     measurement_idx = 0
-
-
     time_stamp_sensor = []
-    # sigma_bars = np.empty((robot1_odometry.shape[0], 3, 3))
-    # sigma_bars[0] = sigma_bar
 
     seen_landmarks = set()
     # Time to actually iterate through the data
@@ -122,10 +119,7 @@ def run(robot_odometry, initial_x, initial_y, initial_theta, robot_measurements)
         reading = None
         while(robot_odometry[i][0] >= robot_measurements[measurement_idx][0]):
             # Add measurement
-            # graph.add(gtsam.BearingRangeFactor2D(i, robot_association_dict[int(robot_measurements[measurement_idx][1])], robot_measurements[measurement_idx][2], gtsam.noiseModel.Diagonal.Sigmas(np.array([sigma_bearing, sigma_range]))))
             angle = robot_measurements[measurement_idx][2]
-            # angle -= np.pi/2 # The data set has the angle off by 90 degrees
-
             m_range = robot_measurements[measurement_idx][3]
             
             measurement_noise = gtsam.noiseModel.Diagonal.Sigmas((sigma_bearing, sigma_range))
@@ -134,7 +128,6 @@ def run(robot_odometry, initial_x, initial_y, initial_theta, robot_measurements)
             landmark_id = robot_association_dict[landmark_id]
             seen_landmarks.add(landmark_id)
             gt_landmark = gtsam.symbol('l', landmark_id)
-
 
             graph.add(gtsam.BearingRangeFactor2D(i, gt_landmark, gtsam.Rot2(angle), m_range, measurement_noise))
             measurement_idx += 1
@@ -146,6 +139,7 @@ def run(robot_odometry, initial_x, initial_y, initial_theta, robot_measurements)
     return graph, graph_keys, seen_landmarks
 
 robot1_odometry = robot1_odometry[100:-1]
+
 # find the starting GT position
 gt_index = 0
 while robot_1_gt[gt_index,0] < robot1_odometry[0,0]:
@@ -156,17 +150,16 @@ gt_stop = gt_index
 while robot_1_gt[gt_stop,0] < robot1_odometry[index,0]:
     gt_stop += 1
 
-# (robot_1_gt[gt_index:gt_stop,1], robot_1_gt[gt_index:gt_stop,2])
-
-
-
 graph, poses, seen_landmarks = run(robot1_odometry, robot_1_gt[gt_index,1], robot_1_gt[gt_index,2], robot_1_gt[gt_index,3], robot1_measurements)
 
 positions_dr = dead_reckoning(robot1_odometry, robot_1_gt[gt_index,1], robot_1_gt[gt_index,2], robot_1_gt[gt_index,3])
 
 estimate = gtsam.Values()
 for i in range(0, len(poses)):
+    # Using dead reckoning as an initial estimate
     estimate.insert(i+1, gtsam.Pose2(positions_dr[i,0], positions_dr[i,1], positions_dr[i,2]))
+    
+    # Using the ground truth as an initial estimate
     # estimate.insert(i+1, gtsam.Pose2(robot_1_gt[gt_index+i+1,1], robot_1_gt[gt_index+i+1,2], robot_1_gt[gt_index+i+1,3]))
 
 
@@ -179,16 +172,8 @@ for i in range(0, len(landmark_gt)):
     landmark_keys.append(gt_landmark)
     estimate.insert(gt_landmark, gtsam.Point2(landmark_gt[i,1], landmark_gt[i,2]))
 
-# Print estimate
-# print("Initial Estimate:")
-# print(estimate)
-
 # Optimize using Levenberg-Marquardt optimization
 result = gtsam.LevenbergMarquardtOptimizer(graph, estimate).optimize()
-
-# Print the results
-# print("Final Result:")
-# print(result)
 
 # Recover the Marginals
 marginals = gtsam.Marginals(graph, result)
@@ -202,26 +187,12 @@ for key in graph_keys:
     i += 1
     if i % 50 == 0:
         gtsam_plot.plot_pose2_on_axes(ax1, result.atPose2(key), 0.05, marginals.marginalCovariance(key))
+
+# Currently can't plot landmarks, don't know correct function call
 # for key in landmark_keys:
 #     gtsam_plot.plot_pose2_on_axes(ax1, result.atPoint2(key), 0.1, marginals.marginalCovariance(key))
 
-# plt.show(block=True)
-
 ## Plotting
-## Static Plotting
-## plot the ground truth landmarks
-## plt.figure()
-## index = 30000
-# index = num_iterations_to_run
-# gt_stop = gt_index
-# while robot_1_gt[gt_stop,0] < robot1_odometry[index,0]:
-#     gt_stop += 1
-
-# ax1.plot(landmark_gt[:,1], landmark_gt[:,2], 'r.', markersize=20)
-# # add labels to the landmarks
-# for i in range(landmark_gt.shape[0]):
-    # plt.text(landmark_gt[i,1], landmark_gt[i,2], str(int(landmark_gt[i,0])))
-
 # plot the ground truth robot trajectory
 ax1.plot(robot_1_gt[gt_index:gt_stop,1], robot_1_gt[gt_index:gt_stop,2], 'b-', label='Ground Truth')
 
@@ -229,38 +200,5 @@ ax1.plot(robot_1_gt[gt_index:gt_stop,1], robot_1_gt[gt_index:gt_stop,2], 'b-', l
 positions_dr = dead_reckoning(robot1_odometry, robot_1_gt[gt_index,1], robot_1_gt[gt_index,2], robot_1_gt[gt_index,3])
 ax1.plot(positions_dr[:index,0], positions_dr[:index,1], 'y-', label='Dead Reckoning')
 
-# # plot the EKF robot trajectory
-# plt.plot(ekf_positions[:index,0], ekf_positions[:index,1], 'g-', label='EKF')
-
-# plot legend with location in upper right
 ax1.legend(loc='upper right')
-
-# plt.title('EKF')
-# plt.xlabel('x(m)')
-# plt.ylabel('y(m)')
-# # make the plot big!
-# plt.gcf().set_size_inches(12, 12)
-
-# # plot the MSE of the dead reckoning trajectory FIXME!
-# sse = []
-# prev_gt_idx = 0
-# for i in tqdm(range(index)):
-#     time_step = ekf_time_stamp_sensors[i][0]
-#     closest_gt_idx = prev_gt_idx
-#     while robot_1_gt[closest_gt_idx,0] < time_step:
-#         closest_gt_idx += 1
-#     sse.append((ekf_positions[i,0]- robot_1_gt[closest_gt_idx,1])**2 + (ekf_positions[i,1] - robot_1_gt[closest_gt_idx,2])**2)
-#     prev_gt_idx = closest_gt_idx
-
-# fig, ax2 = plt.subplots()
-
-# seg_to_time = int(robot1_odometry[-1][0] - robot1_odometry[0][0])
-# # get the MSE of the x and y positions
-# # sse = (ekf_positions[:seg,0]- robot_1_gt[gt_start:gt_start+seg,1])**2 + (ekf_positions[:seg,1] - robot_1_gt[gt_start:gt_start+seg,2])**2
-# ax2.plot(sse, 'r.', markersize=1)
-# # ax3.plot(mse[0], mse[1], 'r.', markersize=20)
-# ax2.grid()
-# ax2.set_title('Sum Squared Error of EKF after {} minutes'.format(int(seg_to_time/60)))
-# ax2.set_xlabel('Time Step')
-# ax2.set_ylabel('Sum Squared Error(m)')
 plt.show()
